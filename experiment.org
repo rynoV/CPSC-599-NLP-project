@@ -1,0 +1,582 @@
+#+title: CPSC 599 NLP Project Experimentation
+#+author: 30093813
+#+property: header-args  :tangle yes :comments link :session t :results output :exports both
+
+#+begin_src python
+from util import change_extension
+from collections import defaultdict
+import nltk
+import spacy
+from spacy.tokens import Token
+import en_core_web_sm
+import re
+import json
+import os
+import glob
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+trained = spacy.load("./packages/en_pipeline-0.0.1/en_pipeline/en_pipeline-0.0.1/")
+print(trained.pipe_names)
+print(trained.component_names)
+trained.analyze_pipes(pretty=True)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+['tok2vec', 'spancat']
+['tok2vec', 'spancat']
+[1m
+============================= Pipeline Overview =============================[0m
+
+#   Component   Assigns      Requires   Scores       Retokenizes
+-   ---------   ----------   --------   ----------   -----------
+0   tok2vec     doc.tensor                           False
+
+1   spancat     doc.spans               spans_sc_f   False
+                                        spans_sc_p
+                                        spans_sc_r
+
+[38;5;2m✔ No problems found.[0m
+#+end_example
+
+#+begin_src python
+data_dir = 'data/html/processed/'
+pattern = os.path.join(data_dir, '**', '*' + '.txt')
+all_txt = glob.glob(pattern, recursive=True)
+texts = []
+for txt in all_txt:
+    with open(txt, 'r') as f:
+        texts.append(f.read())
+
+print(all_txt.index('data/html/processed/unsupervised_learning.txt'))
+for doc in trained.pipe(texts[10:11]):
+    print([(doc.spans['sc'][i], doc.spans['sc'][i].label_) for i in range(5)])
+#+end_src
+
+#+RESULTS:
+: 10
+: [([, 'modules/generated/sklearn.impute.simpleimputer.html#sklearn.impute.simpleimputer'), ([, 'modules/generated/sklearn.model_selection.cross_val_score.html#sklearn.model_selection.cross_val_score'), ([, 'modules/generated/sklearn.ensemble.randomforestclassifier.html#sklearn.ensemble.randomforestclassifier'), ([, 'glossary.html#term-random_state'), ([, 'modules/generated/sklearn.model_selection.gridsearchcv.html#sklearn.model_selection.gridsearchcv')]
+
+#+begin_src python
+nlp = en_core_web_sm.load()
+print(nlp.pipe_names)
+print(nlp.component_names)
+nlp.analyze_pipes(pretty=True)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+['tok2vec', 'tagger', 'parser', 'attribute_ruler', 'lemmatizer', 'ner']
+['tok2vec', 'tagger', 'parser', 'senter', 'attribute_ruler', 'lemmatizer', 'ner']
+[1m
+============================= Pipeline Overview =============================[0m
+
+#   Component         Assigns               Requires   Scores             Retokenizes
+-   ---------------   -------------------   --------   ----------------   -----------
+0   tok2vec           doc.tensor                                          False
+
+1   tagger            token.tag                        tag_acc            False
+
+2   parser            token.dep                        dep_uas            False
+                      token.head                       dep_las
+                      token.is_sent_start              dep_las_per_type
+                      doc.sents                        sents_p
+                                                       sents_r
+                                                       sents_f
+
+3   attribute_ruler                                                       False
+
+4   lemmatizer        token.lemma                      lemma_acc          False
+
+5   ner               doc.ents                         ents_f             False
+                      token.ent_iob                    ents_p
+                      token.ent_type                   ents_r
+                                                       ents_per_type
+
+[38;5;2m✔ No problems found.[0m
+#+end_example
+* Exploring preprocessing
+#+begin_src python
+data_dir = 'data/html/processed/'
+pattern = os.path.join(data_dir, '**', '*' + '.txt')
+all_txt = glob.glob(pattern, recursive=True)
+print(len(all_txt))
+#+end_src
+
+#+RESULTS:
+: 996
+
+#+begin_src python
+all_linkdata = []
+all_links = []
+for path in all_txt:
+    with open(change_extension(path, '.linkdata.json'), 'r') as f:
+        linkdata = json.load(f)
+        all_linkdata.append(linkdata)
+        for v in linkdata.values():
+            all_links.append(v['link'])
+
+all_links_set = set(all_links)
+#+end_src
+
+#+RESULTS:
+** Lowercasing
+We should check if the linkdata would benefit from normalization. In
+particular, it may be the case that the links are case insensitive, or
+are relative paths, in which case two different strings could be
+considered the same link.
+
+There's a few links that are the same but with different
+capitalization:
+
+#+begin_src python
+link_forms = defaultdict(list)
+for link in all_links_set:
+    link_forms[link.lower()].append(link)
+for links in link_forms.values():
+    if len(links) > 1:
+        print(links)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+['https://github.com/GLevV', 'https://github.com/glevv']
+['https://github.com/tomMoral', 'https://github.com/tommoral']
+['#sklearn.covariance.OAS', '#sklearn.covariance.oas']
+['https://github.com/Micky774', 'https://github.com/micky774']
+['https://github.com/GuillemGSubies', 'https://github.com/guillemgsubies']
+['https://github.com/NelleV', 'https://github.com/nellev']
+['#sklearn.cluster.DBSCAN', '#sklearn.cluster.dbscan']
+['#term-Y', '#term-y']
+['#sklearn.decomposition.FastICA', '#sklearn.decomposition.fastica']
+['https://github.com/NicolasHug', 'https://github.com/nicolashug']
+['https://en.wikipedia.org/wiki/Mutual_information', 'https://en.wikipedia.org/wiki/Mutual_Information']
+#+end_example
+
+[[https://www.w3.org/TR/WD-html40-970708/htmlweb.html][Technically]] links are supposed to be case sensitive, but in this
+dataset it appears we should treat the links as case insensitive. The
+only questionable case is "term-y" vs "term-Y", however those both
+lead to the same place ([[https://scikit-learn.org/stable/glossary.html#term-y][here]]). When making this a user-facing product,
+it may be beneficial to have some settings around case sensitivity:
+insensitive/sensitive by default, exceptions.
+
+#+begin_src python
+all_links_lower = [l.lower() for l in all_links]
+all_links_lower_set = set(all_links_lower)
+#+end_src
+
+#+RESULTS:
+** Link normalization
+
+Next we'll explore normalization of the urls.
+
+Initial exploration indicated that the only part of the url that could
+be allowed to vary while still considering links to be equivalent was
+the scheme; in particular "http" vs "https". The host (~netloc~) cannot
+vary due to cases like "github.com/username" and
+"twitter.com/username". The query/params cannot vary due to cases of
+websites that show different pages based on the query, for example
+youtube or mybinder. The fragment cannot vary because it may be used
+to point to different places within the same page. So we'll count the
+cases where the scheme differs across examples:
+
+#+begin_src python
+from urllib.parse import urlparse, urlunparse
+
+link_paths = defaultdict(list)
+
+for l in all_links_lower_set:
+    parse = urlparse(l)
+    p = parse.netloc + parse.path + parse.fragment + parse.query + parse.params
+    if p != '':
+        link_paths[p].append((l, parse))
+
+change_scheme = {}
+for links in link_paths.values():
+    if len(links) > 1:
+        print(links)
+        has_scheme = lambda scheme, ls: filter(lambda l: l[1].scheme == scheme, ls)
+        for httpsl, _ in has_scheme('https', links):
+           for l, p in links:
+               if p.scheme == 'http':
+                   change_scheme[l] = httpsl
+#+end_src
+
+#+RESULTS:
+: [('http://www.sciencedirect.com/science/article/pii/s016786550500303x', ParseResult(scheme='http', netloc='www.sciencedirect.com', path='/science/article/pii/s016786550500303x', params='', query='', fragment='')), ('https://www.sciencedirect.com/science/article/pii/s016786550500303x', ParseResult(scheme='https', netloc='www.sciencedirect.com', path='/science/article/pii/s016786550500303x', params='', query='', fragment=''))]
+: [('http://scikit-learn.org/stable/modules/sgd.html', ParseResult(scheme='http', netloc='scikit-learn.org', path='/stable/modules/sgd.html', params='', query='', fragment='')), ('https://scikit-learn.org/stable/modules/sgd.html', ParseResult(scheme='https', netloc='scikit-learn.org', path='/stable/modules/sgd.html', params='', query='', fragment=''))]
+: [('https://gael-varoquaux.info', ParseResult(scheme='https', netloc='gael-varoquaux.info', path='', params='', query='', fragment='')), ('http://gael-varoquaux.info', ParseResult(scheme='http', netloc='gael-varoquaux.info', path='', params='', query='', fragment=''))]
+: [('http://jmlr.csail.mit.edu/papers/volume2/crammer01a/crammer01a.pdf', ParseResult(scheme='http', netloc='jmlr.csail.mit.edu', path='/papers/volume2/crammer01a/crammer01a.pdf', params='', query='', fragment='')), ('https://jmlr.csail.mit.edu/papers/volume2/crammer01a/crammer01a.pdf', ParseResult(scheme='https', netloc='jmlr.csail.mit.edu', path='/papers/volume2/crammer01a/crammer01a.pdf', params='', query='', fragment=''))]
+: [('http://jmlr.csail.mit.edu/papers/volume11/vinh10a/vinh10a.pdf', ParseResult(scheme='http', netloc='jmlr.csail.mit.edu', path='/papers/volume11/vinh10a/vinh10a.pdf', params='', query='', fragment='')), ('https://jmlr.csail.mit.edu/papers/volume11/vinh10a/vinh10a.pdf', ParseResult(scheme='https', netloc='jmlr.csail.mit.edu', path='/papers/volume11/vinh10a/vinh10a.pdf', params='', query='', fragment=''))]
+: [('https://www.csie.ntu.edu.tw/~cjlin/papers/libsvm.pdf', ParseResult(scheme='https', netloc='www.csie.ntu.edu.tw', path='/~cjlin/papers/libsvm.pdf', params='', query='', fragment='')), ('http://www.csie.ntu.edu.tw/~cjlin/papers/libsvm.pdf', ParseResult(scheme='http', netloc='www.csie.ntu.edu.tw', path='/~cjlin/papers/libsvm.pdf', params='', query='', fragment=''))]
+
+Not that many, but still worth taking into account. For this case,
+changing the scheme may actually break the link, so we'll only change
+the scheme to "https" for cases where there is already an "https"
+variation of the link. We'll also do a roundtrip of parsing the url,
+which should normalize alternate forms of the same link (in particular
+'' and '#').
+
+#+begin_src python
+print(urlunparse(urlparse('#')))
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+all_links_lower_norm = []
+for l in all_links_lower:
+    scheme_updated = change_scheme.get(l) or l
+    all_links_lower_norm.append(urlunparse(urlparse(scheme_updated)))
+print(len(change_scheme))
+print(len(set(all_links_lower)))
+all_links_lower_norm_set = set(all_links_lower_norm)
+print(len(all_links_lower_norm_set))
+#+end_src
+
+#+RESULTS:
+: 6
+: 16905
+: 16899
+
+** Relative links
+Finally we look at normalizing relative paths:
+
+#+begin_src python
+def norm_relative_link(link):
+    if link.startswith('./') or link.startswith('../'):
+        return re.sub(r'^(\.?\./)+', '', link)
+    return link
+
+link_tails = defaultdict(list)
+
+for l in all_links_lower_norm_set:
+    norm = norm_relative_link(l)
+    link_tails[norm].append(l)
+
+multis = [(norm, links) for norm, links in link_tails.items() if len(links) > 1]
+
+print('Number of links with the same tail but different strings:', len(multis))
+for norm, links in multis[:5]:
+    if len(links) > 1:
+        print(norm, links)
+#+end_src
+
+#+RESULTS:
+: Number of links with the same tail but different strings: 646
+: datasets/toy_dataset.html#iris-dataset ['../../datasets/toy_dataset.html#iris-dataset', '../datasets/toy_dataset.html#iris-dataset']
+: auto_examples/svm/plot_svm_anova.html#sphx-glr-auto-examples-svm-plot-svm-anova-py ['../../auto_examples/svm/plot_svm_anova.html#sphx-glr-auto-examples-svm-plot-svm-anova-py', '../auto_examples/svm/plot_svm_anova.html#sphx-glr-auto-examples-svm-plot-svm-anova-py']
+: modules/clustering.html#clustering-evaluation ['../modules/clustering.html#clustering-evaluation', '../../modules/clustering.html#clustering-evaluation']
+: modules/generated/sklearn.impute.iterativeimputer.html#sklearn.impute.iterativeimputer ['../modules/generated/sklearn.impute.iterativeimputer.html#sklearn.impute.iterativeimputer', '../../modules/generated/sklearn.impute.iterativeimputer.html#sklearn.impute.iterativeimputer']
+: modules/generated/sklearn.preprocessing.standardscaler.html#sklearn.preprocessing.standardscaler ['../modules/generated/sklearn.preprocessing.standardscaler.html#sklearn.preprocessing.standardscaler', 'modules/generated/sklearn.preprocessing.standardscaler.html#sklearn.preprocessing.standardscaler', '../../modules/generated/sklearn.preprocessing.standardscaler.html#sklearn.preprocessing.standardscaler']
+
+We see there are a lot of cases where two different strings refer to
+the same location due to the relative link structure. Relative paths
+are something the can be rebuilt automatically, so we'll normalize
+these as well:
+
+#+begin_src python
+all_links_processed = [norm_relative_link(l) for l in all_links_lower_norm if l != '']
+print(len(all_links_set))
+print(len(set(all_links_processed)))
+#+end_src
+
+#+RESULTS:
+: 16916
+: 16162
+
+We see that we have reduced the total number of classes by about 800,
+but this is likely still too many.
+
+** Reducing the number of classes
+We look at the number of examples we have for each link:
+
+#+begin_src python
+counter = defaultdict(int)
+
+for link in all_links_processed:
+    counter[link] += 1
+
+def count_eq_to(counts, n):
+    return [k for k, v in counts.items() if v == n]
+
+freq_links = []
+print('Total links:', len(counter))
+for n in range(50):
+    links = count_eq_to(counter, n)
+    c = len(links)
+    print(f'Number of links with {n} example(s):', c, sep='\t')
+    if n > 25:
+        freq_links += links
+
+print('Links with 25 or more examples:', freq_links)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Total links: 16162
+Number of links with 0 example(s):	0
+Number of links with 1 example(s):	10870
+Number of links with 2 example(s):	3255
+Number of links with 3 example(s):	666
+Number of links with 4 example(s):	323
+Number of links with 5 example(s):	228
+Number of links with 6 example(s):	159
+Number of links with 7 example(s):	96
+Number of links with 8 example(s):	95
+Number of links with 9 example(s):	83
+Number of links with 10 example(s):	50
+Number of links with 11 example(s):	37
+Number of links with 12 example(s):	38
+Number of links with 13 example(s):	30
+Number of links with 14 example(s):	24
+Number of links with 15 example(s):	16
+Number of links with 16 example(s):	15
+Number of links with 17 example(s):	13
+Number of links with 18 example(s):	12
+Number of links with 19 example(s):	15
+Number of links with 20 example(s):	6
+Number of links with 21 example(s):	9
+Number of links with 22 example(s):	12
+Number of links with 23 example(s):	16
+Number of links with 24 example(s):	7
+Number of links with 25 example(s):	4
+Number of links with 26 example(s):	5
+Number of links with 27 example(s):	3
+Number of links with 28 example(s):	3
+Number of links with 29 example(s):	3
+Number of links with 30 example(s):	0
+Number of links with 31 example(s):	2
+Number of links with 32 example(s):	4
+Number of links with 33 example(s):	4
+Number of links with 34 example(s):	2
+Number of links with 35 example(s):	2
+Number of links with 36 example(s):	4
+Number of links with 37 example(s):	3
+Number of links with 38 example(s):	2
+Number of links with 39 example(s):	2
+Number of links with 40 example(s):	2
+Number of links with 41 example(s):	1
+Number of links with 42 example(s):	1
+Number of links with 43 example(s):	1
+Number of links with 44 example(s):	6
+Number of links with 45 example(s):	2
+Number of links with 46 example(s):	0
+Number of links with 47 example(s):	0
+Number of links with 48 example(s):	0
+Number of links with 49 example(s):	0
+Links with 25 or more examples: ['#id10', 'modules/generated/sklearn.ensemble.isolationforest.html#sklearn.ensemble.isolationforest', 'modules/generated/sklearn.tree.decisiontreeregressor.html#sklearn.tree.decisiontreeregressor', 'https://sites.google.com/site/peterprettenhofer/', 'classes.html#module-sklearn.cluster', 'https://github.com/ogrisel', 'glossary.html#term-get_feature_names_out', 'http://fa.bianp.net', 'https://github.com/qinhanmin2014', 'glossary.html#term-cv-splitter', 'classes.html#module-sklearn.metrics.pairwise', '#id7', 'modules/generated/sklearn.tree.decisiontreeclassifier.html#sklearn.tree.decisiontreeclassifier', 'modules/generated/sklearn.preprocessing.onehotencoder.html#sklearn.preprocessing.onehotencoder', 'modules/generated/sklearn.feature_extraction.text.countvectorizer.html#sklearn.feature_extraction.text.countvectorizer', 'classes.html#module-sklearn.preprocessing', 'modules/generated/sklearn.linear_model.ridge.html#sklearn.linear_model.ridge', 'http://www.montefiore.ulg.ac.be/~glouppe/', 'glossary.html#term-warm_start', 'classes.html#module-sklearn.model_selection', 'modules/generated/sklearn.manifold.tsne.html#sklearn.manifold.tsne', 'modules/generated/sklearn.preprocessing.standardscaler.html#sklearn.preprocessing.standardscaler', 'modules/generated/sklearn.svm.svc.html#sklearn.svm.svc', 'glossary.html#term-decision_function', 'modules/generated/sklearn.compose.columntransformer.html#sklearn.compose.columntransformer', 'modules/generated/sklearn.ensemble.randomforestclassifier.html#sklearn.ensemble.randomforestclassifier', 'https://github.com/micky774', 'cross_validation.html#cross-validation', 'https://manojbits.wordpress.com', 'http://www.ajoly.org', 'https://github.com/larsmans', 'sklearn.utils.bunch.html#sklearn.utils.bunch', 'https://github.com/adrinjalali', 'glossary.html#term-predict_proba', 'http://www.mblondel.org', 'modules/generated/sklearn.model_selection.randomizedsearchcv.html#sklearn.model_selection.randomizedsearchcv', 'https://github.com/scikit-learn/scikit-learn/blob/449940985/sklearn/base.py#l908', 'modules/generated/sklearn.linear_model.sgdclassifier.html#sklearn.linear_model.sgdclassifier', 'https://github.com/scikit-learn/scikit-learn/blob/449940985/sklearn/base.py#l623', 'https://github.com/lorentzenchr', 'https://github.com/tomdlt', '#id6', 'modules/generated/sklearn.ensemble.gradientboostingclassifier.html#sklearn.ensemble.gradientboostingclassifier', 'modules/generated/sklearn.decomposition.pca.html#sklearn.decomposition.pca', 'modules/generated/sklearn.ensemble.gradientboostingregressor.html#sklearn.ensemble.gradientboostingregressor', 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 'https://gael-varoquaux.info', 'modules/generated/sklearn.ensemble.histgradientboostingclassifier.html#sklearn.ensemble.histgradientboostingclassifier', 'http://alexandre.gramfort.net', 'classes.html#module-sklearn.linear_model', '#id5', 'classes.html#module-sklearn.datasets']
+#+end_example
+
+We see that the majority of links have few examples, and a minority
+are heavily used. Fortunately for this application, we can focus our
+efforts on classifying the most heavily used links, as those are the
+links which will most likely be needed again.
+
+We can look at the number of classification classes depending on our
+minimum threshold for the number of available examples:
+
+#+begin_src python
+def count_ge_to(counts, n):
+    return [k for k, v in counts.items() if v >= n]
+
+for n in range(50):
+    links = count_ge_to(counter, n)
+    print(f'Number of classes with at least {n} example(s):', len(links), sep='\t')
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Number of classes with at least 0 example(s):	16162
+Number of classes with at least 1 example(s):	16162
+Number of classes with at least 2 example(s):	5292
+Number of classes with at least 3 example(s):	2037
+Number of classes with at least 4 example(s):	1371
+Number of classes with at least 5 example(s):	1048
+Number of classes with at least 6 example(s):	820
+Number of classes with at least 7 example(s):	661
+Number of classes with at least 8 example(s):	565
+Number of classes with at least 9 example(s):	470
+Number of classes with at least 10 example(s):	387
+Number of classes with at least 11 example(s):	337
+Number of classes with at least 12 example(s):	300
+Number of classes with at least 13 example(s):	262
+Number of classes with at least 14 example(s):	232
+Number of classes with at least 15 example(s):	208
+Number of classes with at least 16 example(s):	192
+Number of classes with at least 17 example(s):	177
+Number of classes with at least 18 example(s):	164
+Number of classes with at least 19 example(s):	152
+Number of classes with at least 20 example(s):	137
+Number of classes with at least 21 example(s):	131
+Number of classes with at least 22 example(s):	122
+Number of classes with at least 23 example(s):	110
+Number of classes with at least 24 example(s):	94
+Number of classes with at least 25 example(s):	87
+Number of classes with at least 26 example(s):	83
+Number of classes with at least 27 example(s):	78
+Number of classes with at least 28 example(s):	75
+Number of classes with at least 29 example(s):	72
+Number of classes with at least 30 example(s):	69
+Number of classes with at least 31 example(s):	69
+Number of classes with at least 32 example(s):	67
+Number of classes with at least 33 example(s):	63
+Number of classes with at least 34 example(s):	59
+Number of classes with at least 35 example(s):	57
+Number of classes with at least 36 example(s):	55
+Number of classes with at least 37 example(s):	51
+Number of classes with at least 38 example(s):	48
+Number of classes with at least 39 example(s):	46
+Number of classes with at least 40 example(s):	44
+Number of classes with at least 41 example(s):	42
+Number of classes with at least 42 example(s):	41
+Number of classes with at least 43 example(s):	40
+Number of classes with at least 44 example(s):	39
+Number of classes with at least 45 example(s):	33
+Number of classes with at least 46 example(s):	31
+Number of classes with at least 47 example(s):	31
+Number of classes with at least 48 example(s):	31
+Number of classes with at least 49 example(s):	31
+#+end_example
+
+We can visualize the relationship between the number of examples and
+the number of classes:
+
+#+BEGIN_src python :results output file :file numclasses.png :output-dir images/
+import sys
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+x = range(50)
+ax.plot(x, [len(count_ge_to(counter, n)) for n in x])
+ax.set_xlabel('Num examples')
+ax.set_ylabel('Num classes')
+plt.ylim([0, 800])
+fig.tight_layout()
+
+plt.savefig(sys.stdout.buffer)
+#+END_src
+
+#+RESULTS:
+[[file:images/numclasses.png]]
+
+* Train/test splitting
+We can make preprocessed data splits using:
+
+#+begin_src shell :eval no
+python train_test_split.py data/html/processed/ <min_examples> <test_size>
+#+end_src
+
+This script is a tool to split the data while trying to keep a good
+amount of examples in the training and test sets, but it's not
+perfect.
+
+We'll explore which data set provides the best balance between number
+of classes and number of examples in the test and train sets.
+
+#+begin_src python
+def show_data_summary(paths, desired_examples, show_classes):
+    docs_data = []
+    for p in paths:
+        with open(p, 'r') as f:
+            link_data = json.load(f)
+            docs_data.append(link_data)
+    totals = defaultdict(int)
+    for v in (v for d in docs_data for v in d.values()):
+        link = v['link']
+        if link is not None:
+            totals[link] += 1
+    print('Total classes:\t', len(totals))
+    print('Total classes with desired number of examples:\t', len({k: v for k, v in totals.items() if v >= desired_examples}))
+    if show_classes:
+        print('Classes:', sorted([(v, k) for k, v in totals.items()], reverse=True))
+    return len(totals)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+def summarize_data_split(min_examples, test_size, show_classes=False):
+    pattern = os.path.join('split', f'train-{min_examples}-{test_size*100:.0f}', '**', '*' + '.linkdata.json')
+    trainpaths = glob.glob(pattern, recursive=True)
+    pattern = os.path.join('split', f'test-{min_examples}-{test_size*100:.0f}', '**', '*' + '.linkdata.json')
+    testpaths = glob.glob(pattern, recursive=True)
+    print('Min examples:', min_examples, '| Test size:', test_size)
+    print('(train)')
+    trainclasses = show_data_summary(trainpaths, 2, show_classes)
+    print('(test)')
+    testclasses = show_data_summary(testpaths, 2, show_classes)
+    print('Num classes with no test examples:', trainclasses - testclasses)
+    print()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+summarize_data_split(5, 0.33)
+summarize_data_split(10, 0.33)
+summarize_data_split(15, 0.33)
+summarize_data_split(20, 0.33, show_classes=False)
+summarize_data_split(25, 0.33)
+summarize_data_split(30, 0.33)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Min examples: 5 | Test size: 0.33
+(train)
+Total classes:	 1044
+Total classes with desired number of examples:	 961
+(test)
+Total classes:	 948
+Total classes with desired number of examples:	 807
+Num classes with no test examples: 96
+
+Min examples: 10 | Test size: 0.33
+(train)
+Total classes:	 387
+Total classes with desired number of examples:	 374
+(test)
+Total classes:	 379
+Total classes with desired number of examples:	 378
+Num classes with no test examples: 8
+
+Min examples: 15 | Test size: 0.33
+(train)
+Total classes:	 208
+Total classes with desired number of examples:	 208
+(test)
+Total classes:	 207
+Total classes with desired number of examples:	 207
+Num classes with no test examples: 1
+
+Min examples: 20 | Test size: 0.33
+(train)
+Total classes:	 137
+Total classes with desired number of examples:	 137
+(test)
+Total classes:	 136
+Total classes with desired number of examples:	 136
+Num classes with no test examples: 1
+
+Min examples: 25 | Test size: 0.33
+(train)
+Total classes:	 87
+Total classes with desired number of examples:	 87
+(test)
+Total classes:	 86
+Total classes with desired number of examples:	 86
+Num classes with no test examples: 1
+
+Min examples: 30 | Test size: 0.33
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+Num classes with no test examples: 0
+#+end_example
