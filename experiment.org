@@ -7,18 +7,19 @@ from util import change_extension
 from collections import defaultdict
 import nltk
 import spacy
-from spacy.tokens import Token
+from spacy.tokens import Token, DocBin
 import en_core_web_sm
 import re
 import json
 import os
 import glob
+import components
 #+end_src
 
 #+RESULTS:
 
 #+begin_src python
-trained = spacy.load("./packages/en_pipeline-0.0.1/en_pipeline/en_pipeline-0.0.1/")
+trained = spacy.load("./packages/en_pipeline-0.0.6/en_pipeline/en_pipeline-0.0.6/")
 print(trained.pipe_names)
 print(trained.component_names)
 trained.analyze_pipes(pretty=True)
@@ -26,21 +27,29 @@ trained.analyze_pipes(pretty=True)
 
 #+RESULTS:
 #+begin_example
-['tok2vec', 'spancat']
-['tok2vec', 'spancat']
+['transformer', 'spancat']
+['transformer', 'spancat']
 [1m
 ============================= Pipeline Overview =============================[0m
 
-#   Component   Assigns      Requires   Scores       Retokenizes
--   ---------   ----------   --------   ----------   -----------
-0   tok2vec     doc.tensor                           False
+#   Component     Assigns          Requires   Scores       Retokenizes
+-   -----------   --------------   --------   ----------   -----------
+0   transformer   doc._.trf_data                           False
 
-1   spancat     doc.spans               spans_sc_f   False
-                                        spans_sc_p
-                                        spans_sc_r
+1   spancat       doc.spans                   spans_sc_f   False
+                                              spans_sc_p
+                                              spans_sc_r
 
 [38;5;2m✔ No problems found.[0m
 #+end_example
+
+#+begin_src python
+def show_spans(doc):
+    print(doc)
+    print(*((s, s.label_, s.start, s.end) for s in doc.spans['sc']))
+#+end_src
+
+#+RESULTS:
 
 #+begin_src python
 data_dir = 'data/html/processed/'
@@ -51,14 +60,381 @@ for txt in all_txt:
     with open(txt, 'r') as f:
         texts.append(f.read())
 
+# TODO: update to apply same preprocessing to these texts before making predictions
 print(all_txt.index('data/html/processed/unsupervised_learning.txt'))
-for doc in trained.pipe(texts[10:11]):
-    print([(doc.spans['sc'][i], doc.spans['sc'][i].label_) for i in range(5)])
+for doc in trained.pipe(texts[:10]):
+    l = len(doc.spans['sc'])
+    if l > 0:
+        show_spans(doc)
 #+end_src
 
 #+RESULTS:
-: 10
-: [([, 'modules/generated/sklearn.impute.simpleimputer.html#sklearn.impute.simpleimputer'), ([, 'modules/generated/sklearn.model_selection.cross_val_score.html#sklearn.model_selection.cross_val_score'), ([, 'modules/generated/sklearn.ensemble.randomforestclassifier.html#sklearn.ensemble.randomforestclassifier'), ([, 'glossary.html#term-random_state'), ([, 'modules/generated/sklearn.model_selection.gridsearchcv.html#sklearn.model_selection.gridsearchcv')]
+#+begin_example
+10
+{'sc': [WRAPEND]}
+[(WRAPEND, 'https://joblib.readthedocs.io/en/latest/parallel.html#joblib.parallel_backend')]
+{'sc': [WRAPEND_]}
+[(WRAPEND_, 'modules/generated/sklearn.ensemble.gradientboostingregressor.html#sklearn.ensemble.gradientboostingregressor')]
+{'sc': [fit, WRAPEND]}
+[(fit, 'glossary.html#term-fit'), (WRAPEND, 'https://joblib.readthedocs.io/en/latest/parallel.html#joblib.parallel_backend')]
+{'sc': [WRAPEND_]}
+[(WRAPEND_, 'glossary.html#term-classes_')]
+{'sc': [WRAPEND]}
+[(WRAPEND, 'https://joblib.readthedocs.io/en/latest/parallel.html#joblib.parallel_backend')]
+{'sc': [WRAPEND, _]}
+[(WRAPEND, 'https://joblib.readthedocs.io/en/latest/parallel.html#joblib.parallel_backend'), (_, 'glossary.html#term-decision_function')]
+{'sc': [Thomas Fan, Andreas Müller, Adrin Jalali, SLEP _]}
+[(Thomas Fan, 'https://github.com/thomasjpfan'), (Andreas Müller, 'https://amueller.github.io/'), (Adrin Jalali, 'https://github.com/adrinjalali'), (SLEP _, 'glossary.html#term-predict_proba')]
+#+end_example
+
+#+begin_src python
+exs = ['One needs to fit the model to the data.', 'Refer to the glossary'
+       , 'This was provided by Thomas Fan'
+       , 'To provide a good fit the model needs to be trained.'
+       , 'A pipeline can be used to improve the model by using cross validation.'
+       , 'This is referred to as a warm start'
+       , 'In classification the model is trained to predict a number of classes'
+       , 'Classification algorithms usually also offer a way to quantify certainty of a prediction, either using decision_function or predict_proba'
+       , 'All built-in estimators also have a set_params method, which sets data-independent parameters (overriding previous parameter values passed to __init__).'
+       , 'y might be ignored in the case of unsupervised learning. However, to make it possible to use the estimator as part of a pipeline that can mix both supervised and unsupervised transformers, even unsupervised estimators need to accept a y=None keyword argument in the second position that is just ignored by the estimator.'
+       , 'When fit is called, any previous call to fit should be ignored. In general, calling estimator.fit(X1) and then estimator.fit(X2) should be the same as only calling estimator.fit(X2). However, this may not be true in practice when fit depends on some random process, see random_state. Another exception to this rule is when the hyper-parameter warm_start is set to True for estimators that support it.'
+       , 'Attributes that have been estimated from the data must always have a name ending with trailing underscore, for example the coefficients of some regression estimator would be stored in a coef_ attribute after fit has been called.'
+       , 'Often, the subestimator has a name (as e.g. named steps in a Pipeline object), in which case the key should become <name>__C, <name>__class_weight, etc.'
+       , 'Often, the subestimator has a name (as e.g. named steps in Pipeline objects), in which case the key should become <name>__C, <name>__class_weight, etc.'
+       , 'For an estimator to be usable together with pipeline.Pipeline in any but the last step, it needs to provide a fit or fit_transform function. To be able to evaluate the pipeline on any data but the training set, it also needs to provide a transform function. There are no special requirements for the last step in a pipeline, except that it has a fit function. All fit and fit_transform functions must take arguments X, y, even if y is not used. Similarly, for score to be usable, the last step of the pipeline needs to have a score function that accepts an optional y.'
+       , 'In a Pipeline object you can use GridSearchCV or RandomForestClassifier'
+       , 'Whether you are proposing an estimator for inclusion in scikit-learn, developing a separate package compatible with scikit-learn, or implementing custom components for your own projects, this chapter details how to develop objects that safely interact with scikit-learn Pipelines and model selection tools.'
+       , 'The base object, implements a fit method to learn from data'
+       , 'Elements of the scikit-learn API are described more definitively in the Glossary of Common Terms and API Elements.']
+for doc in trained.pipe(exs):
+    show_spans(doc)
+    print()
+#+end_src
+
+#+RESULTS:
+#+begin_example
+One needs to fit the model to the data.
+
+
+Refer to the glossary
+
+
+This was provided by Thomas Fan
+(Thomas Fan, 'https://github.com/thomasjpfan', 4, 6)
+
+To provide a good fit the model needs to be trained.
+
+
+A pipeline can be used to improve the model by using cross validation.
+(pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 1, 2)
+
+This is referred to as a warm start
+
+
+In classification the model is trained to predict a number of classes
+
+
+Classification algorithms usually also offer a way to quantify certainty of a prediction, either using decision_function or predict_proba
+(predict_proba, 'glossary.html#term-predict_proba', 18, 19) (decision_function, 'glossary.html#term-decision_function', 16, 17)
+
+All built-in estimators also have a set_params method, which sets data-independent parameters (overriding previous parameter values passed to __init__).
+
+
+y might be ignored in the case of unsupervised learning. However, to make it possible to use the estimator as part of a pipeline that can mix both supervised and unsupervised transformers, even unsupervised estimators need to accept a y=None keyword argument in the second position that is just ignored by the estimator.
+(pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 25, 26)
+
+When fit is called, any previous call to fit should be ignored. In general, calling estimator.fit(X1) and then estimator.fit(X2) should be the same as only calling estimator.fit(X2). However, this may not be true in practice when fit depends on some random process, see random_state. Another exception to this rule is when the hyper-parameter warm_start is set to True for estimators that support it.
+
+
+Attributes that have been estimated from the data must always have a name ending with trailing underscore, for example the coefficients of some regression estimator would be stored in a coef_ attribute after fit has been called.
+(fit, 'glossary.html#term-fit', 35, 36)
+
+Often, the subestimator has a name (as e.g. named steps in a Pipeline object), in which case the key should become <name>__C, <name>__class_weight, etc.
+(Pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 14, 15)
+
+Often, the subestimator has a name (as e.g. named steps in Pipeline objects), in which case the key should become <name>__C, <name>__class_weight, etc.
+
+
+For an estimator to be usable together with pipeline.Pipeline in any but the last step, it needs to provide a fit or fit_transform function. To be able to evaluate the pipeline on any data but the training set, it also needs to provide a transform function. There are no special requirements for the last step in a pipeline, except that it has a fit function. All fit and fit_transform functions must take arguments X, y, even if y is not used. Similarly, for score to be usable, the last step of the pipeline needs to have a score function that accepts an optional y.
+(fit, 'glossary.html#term-fit', 74, 75)
+
+In a Pipeline object you can use GridSearchCV or RandomForestClassifier
+(GridSearchCV, 'modules/generated/sklearn.model_selection.gridsearchcv.html#sklearn.model_selection.gridsearchcv', 7, 8) (RandomForestClassifier, 'modules/generated/sklearn.ensemble.randomforestclassifier.html#sklearn.ensemble.randomforestclassifier', 9, 10)
+
+Whether you are proposing an estimator for inclusion in scikit-learn, developing a separate package compatible with scikit-learn, or implementing custom components for your own projects, this chapter details how to develop objects that safely interact with scikit-learn Pipelines and model selection tools.
+
+
+The base object, implements a fit method to learn from data
+(fit, 'glossary.html#term-fit', 6, 7)
+
+Elements of the scikit-learn API are described more definitively in the Glossary of Common Terms and API Elements.
+(Glossary, 'glossary.html#term-n_jobs', 13, 14)
+#+end_example
+
+#+begin_src python
+db = DocBin().from_disk('test.spacy')
+docs = list(db.get_docs(trained.vocab))
+common_labels = ['https://sphinx-gallery.github.io']
+desired_labels = [
+    # 'glossary.html#term-fit',
+    # 'glossary.html#term-random_state',
+    # 'glossary.html#term-n_jobs',
+    # 'https://github.com/scikit-learn/scikit-learn/blob/449940985/sklearn/base.py#l153',
+    'sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline'
+]
+c = 0
+for doc, orig_spans in zip(trained.pipe(doc.text for doc in docs), (doc.spans['sc'] for doc in docs)):
+    spans = doc.spans['sc']
+    # if len(spans) > 0 and any(s.label_ not in common_labels for s in spans):
+    # if len(spans) > 0 and any(s.label_ in desired_labels for s in spans):
+    links = set(s.label_ for s in spans)
+    orig_links = set(s.label_ for s in orig_spans)
+    if orig_links != links:
+        c += 1
+        print(*((s, s.label_, s.start, s.end) for s in orig_spans))
+        show_spans(doc)
+        if c > 5:
+            break
+#+end_src
+
+#+RESULTS:
+#+begin_example
+(Lars Buitinck, 'https://github.com/larsmans', 31, 33) (Andreas Müller, 'https://amueller.github.io/', 38, 40) (Gael Varoquaux, 'https://gael-varoquaux.info', 45, 47) (Gilles Louppe, 'http://www.montefiore.ulg.ac.be/~glouppe/', 85, 87) (Mathieu Blondel, 'http://www.mblondel.org', 92, 94)
+
+
+-   Other small improvements to tests and documentation.
+
+People ¶
+
+List of contributors for release 0.13.1 by number of commits.
+-   16  Lars Buitinck
+
+-   12  Andreas Müller
+
+-   8  Gael Varoquaux
+
+-   5 Robert Marchman
+
+-   3  Peter Prettenhofer
+
+-   2 Hrishikesh Huilgolkar
+
+-   1 Bastiaan van den Berg
+
+-   1 Diego Molla
+
+-   1  Gilles Louppe
+
+-   1  Mathieu Blondel
+
+-   1  Nelle Varoquaux
+
+-   1 Rafael Cunha de Almeida
+
+-   1 Rolando Espinoza La fuente
+
+-   1  Vlad Niculae
+
+-   1  Yaroslav Halchenko
+
+Version 0.13 ¶
+
+January 21, 2013
+
+New Estimator Classes ¶
+
+-    dummy.
+(Gilles Louppe, 'http://www.montefiore.ulg.ac.be/~glouppe/', 85, 87) (Mathieu Blondel, 'http://www.mblondel.org', 92, 94)
+(Mathieu Blondel, 'http://www.mblondel.org', 139, 141)
+
+-   16  Lars Buitinck
+
+-   12  Andreas Müller
+
+-   8  Gael Varoquaux
+
+-   5 Robert Marchman
+
+-   3  Peter Prettenhofer
+
+-   2 Hrishikesh Huilgolkar
+
+-   1 Bastiaan van den Berg
+
+-   1 Diego Molla
+
+-   1  Gilles Louppe
+
+-   1  Mathieu Blondel
+
+-   1  Nelle Varoquaux
+
+-   1 Rafael Cunha de Almeida
+
+-   1 Rolando Espinoza La fuente
+
+-   1  Vlad Niculae
+
+-   1  Yaroslav Halchenko
+
+Version 0.13 ¶
+
+January 21, 2013
+
+New Estimator Classes ¶
+
+-    dummy.DummyClassifier  and  dummy.DummyRegressor , two data-independent predictors by  Mathieu Blondel .
+(Mathieu Blondel, 'http://www.mblondel.org', 139, 141) (Gilles Louppe, 'http://www.montefiore.ulg.ac.be/~glouppe/', 59, 61) (Mathieu Blondel, 'http://www.mblondel.org', 66, 68) (dummy.DummyRegressor, 'modules/generated/sklearn.ensemble.gradientboostingregressor.html#sklearn.ensemble.gradientboostingregressor', 128, 131)
+(Lars Buitinck, 'https://github.com/larsmans', 56, 58)
+SelectPercentile  are more numerically stable since they use scores, rather than p-values, to rank results. This means that they might sometimes select different features than they did previously.
+
+-   Ridge regression and ridge classification fitting with sparse_cg solver no longer has quadratic memory complexity, by  Lars Buitinck  and  Fabian Pedregosa .
+(Lars Buitinck, 'https://github.com/larsmans', 56, 58) (Ridge, 'modules/generated/sklearn.linear_model.ridge.html#sklearn.linear_model.ridge', 38, 39) (ridge, 'modules/generated/sklearn.linear_model.ridge.html#sklearn.linear_model.ridge', 41, 42)
+(Mathieu Blondel, 'http://www.mblondel.org', 62, 64)
+This means that they might sometimes select different features than they did previously.
+
+-   Ridge regression and ridge classification fitting with sparse_cg solver no longer has quadratic memory complexity, by  Lars Buitinck  and  Fabian Pedregosa .
+
+-   Ridge regression and ridge classification now support a new fast solver called lsqr, by  Mathieu Blondel .
+(Mathieu Blondel, 'http://www.mblondel.org', 62, 64) (ridge, 'modules/generated/sklearn.linear_model.ridge.html#sklearn.linear_model.ridge', 49, 50) (Ridge, 'modules/generated/sklearn.linear_model.ridge.html#sklearn.linear_model.ridge', 46, 47)
+(Andreas Müller, 'https://amueller.github.io/', 43, 45) (Arnaud Joly, 'http://www.ajoly.org', 50, 52) (Gael Varoquaux, 'https://gael-varoquaux.info', 64, 66) (Mathieu Blondel, 'http://www.mblondel.org', 71, 73) (Lars Buitinck, 'https://github.com/larsmans', 78, 80) (Olivier Grisel, 'https://twitter.com/ogrisel', 91, 93) (Gilles Louppe, 'http://www.montefiore.ulg.ac.be/~glouppe/', 105, 107) (Alexandre Gramfort, 'http://alexandre.gramfort.net', 119, 121)
+
+
+-   In the Naive Bayes classifiers, the class_prior parameter was moved from fit to __init__.
+
+People ¶
+
+List of contributors for release 0.13 by number of commits.
+
+  -   364  Andreas Müller
+
+  -   143  Arnaud Joly
+
+  -   137  Peter Prettenhofer
+
+  -   131  Gael Varoquaux
+
+  -   117  Mathieu Blondel
+
+  -   108  Lars Buitinck
+
+  -   106 Wei Li
+
+  -   101  Olivier Grisel
+
+  -   65  Vlad Niculae
+
+  -   54  Gilles Louppe
+
+  -   40  Jaques Grobler
+
+  -   38  Alexandre Gramfort
+
+  -   30  Rob Zinkov
+
+  -   19 Aymeric Masurelle
+
+  -   18 Andrew Winterman
+
+  -   17  Fabian Pedregosa
+
+  -   17 Nelle Varoquaux
+
+  -   16  Christian Osendorfer
+
+  -   14  Daniel Nouri
+
+  -   13  Virgile Fritsch
+
+  -   13 syhw
+
+  -   12  Satrajit Ghosh
+
+  -   10 Corey Lynch
+
+  -   10 Kyle Beauchamp
+
+  -   9 Brian Cheung
+
+  -   9 Immanuel Bayer
+
+  -   9 mr.
+(Olivier Grisel, 'https://twitter.com/ogrisel', 91, 93) (Mathieu Blondel, 'http://www.mblondel.org', 71, 73) (Alexandre Gramfort, 'http://alexandre.gramfort.net', 119, 121) (Gael Varoquaux, 'https://gael-varoquaux.info', 64, 66) (Gilles Louppe, 'http://www.montefiore.ulg.ac.be/~glouppe/', 105, 107) (Arnaud Joly, 'http://www.ajoly.org', 50, 52) (Andreas Müller, 'https://amueller.github.io/', 43, 45)
+(Thomas Fan, 'https://github.com/thomasjpfan', 288, 290)
+
+
+-   Version 0.24.2
+    -   Changelog
+        -   sklearn.compose
+        -   sklearn.cross_decomposition
+        -   sklearn.decomposition
+        -   sklearn.ensemble
+        -   feature_extraction
+        -   sklearn.gaussian_process
+        -   sklearn.linear_model
+        -   sklearn.metrics
+        -   sklearn.model_selection
+        -   sklearn.multioutput
+        -   sklearn.preprocessing
+        -   sklearn.semi_supervised
+        -   sklearn.tree
+        -   sklearn.utils
+-   Version 0.24.1
+    -   Packaging
+    -   Changelog
+        -   sklearn.metrics
+        -   sklearn.semi_supervised
+-   Version 0.24.0
+    -   Legend for changelogs
+    -   Changed models
+    -   Changelog
+        -   sklearn.base
+        -   sklearn.calibration
+        -   sklearn.cluster
+        -   sklearn.compose
+        -   sklearn.covariance
+        -   sklearn.cross_decomposition
+        -   sklearn.datasets
+        -   sklearn.decomposition
+        -   sklearn.discriminant_analysis
+        -   sklearn.ensemble
+        -   sklearn.exceptions
+        -   sklearn.feature_extraction
+        -   sklearn.feature_selection
+        -   sklearn.gaussian_process
+        -   sklearn.impute
+        -   sklearn.inspection
+        -   sklearn.isotonic
+        -   sklearn.kernel_approximation
+        -   sklearn.linear_model
+        -   sklearn.manifold
+        -   sklearn.metrics
+        -   sklearn.model_selection
+        -   sklearn.multiclass
+        -   sklearn.multioutput
+        -   sklearn.naive_bayes
+        -   sklearn.neighbors
+        -   sklearn.neural_network
+        -   sklearn.pipeline
+        -   sklearn.preprocessing
+        -   sklearn.semi_supervised
+        -   sklearn.svm
+        -   sklearn.tree
+        -   sklearn.utils
+        -   Miscellaneous
+    -   Code and Documentation Contributors
+
+Version 0.24.2 ¶
+
+April 2021
+
+Changelog ¶
+
+ sklearn.compose  ¶
+
+-   Fix compose.ColumnTransformer.get_feature_names does not call get_feature_names on transformers with an empty column selection.  #19579  by  Thomas Fan .
+(Thomas Fan, 'https://github.com/thomasjpfan', 288, 290) (sklearn.preprocessing, 'classes.html#module-sklearn.preprocessing', 52, 53)
+#+end_example
 
 #+begin_src python
 nlp = en_core_web_sm.load()
@@ -504,7 +880,7 @@ def summarize_data_split(min_examples, test_size, show_classes=False):
     trainpaths = glob.glob(pattern, recursive=True)
     pattern = os.path.join('split', f'test-{min_examples}-{test_size*100:.0f}', '**', '*' + '.linkdata.json')
     testpaths = glob.glob(pattern, recursive=True)
-    print('Min examples:', min_examples, '| Test size:', test_size)
+    print('Min examples:', min_examples, '| Test size:', test_size, f'| Train/test counts: {len(trainpaths)}/{len(testpaths)}')
     print('(train)')
     trainclasses = show_data_summary(trainpaths, 2, show_classes)
     print('(test)')
@@ -514,6 +890,204 @@ def summarize_data_split(min_examples, test_size, show_classes=False):
 #+end_src
 
 #+RESULTS:
+
+#+begin_src python
+summarize_data_split(5, 0.05)
+summarize_data_split(10, 0.05)
+summarize_data_split(15, 0.05)
+summarize_data_split(20, 0.05, show_classes=False)
+summarize_data_split(25, 0.05)
+summarize_data_split(30, 0.05)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Min examples: 5 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 1048
+Total classes with desired number of examples:	 1047
+(test)
+Total classes:	 319
+Total classes with desired number of examples:	 152
+Num classes with no test examples: 729
+
+Min examples: 10 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 387
+Total classes with desired number of examples:	 387
+(test)
+Total classes:	 230
+Total classes with desired number of examples:	 127
+Num classes with no test examples: 157
+
+Min examples: 15 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 208
+Total classes with desired number of examples:	 208
+(test)
+Total classes:	 171
+Total classes with desired number of examples:	 106
+Num classes with no test examples: 37
+
+Min examples: 20 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 137
+Total classes with desired number of examples:	 137
+(test)
+Total classes:	 136
+Total classes with desired number of examples:	 86
+Num classes with no test examples: 1
+
+Min examples: 25 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 87
+Total classes with desired number of examples:	 87
+(test)
+Total classes:	 86
+Total classes with desired number of examples:	 70
+Num classes with no test examples: 1
+
+Min examples: 30 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 69
+Total classes with desired number of examples:	 59
+Num classes with no test examples: 0
+#+end_example
+
+#+begin_src python
+summarize_data_split(5, 0.07)
+summarize_data_split(10, 0.07)
+summarize_data_split(15, 0.07)
+summarize_data_split(20, 0.07, show_classes=False)
+summarize_data_split(25, 0.07)
+summarize_data_split(30, 0.07)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Min examples: 5 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 1048
+Total classes with desired number of examples:	 1045
+(test)
+Total classes:	 447
+Total classes with desired number of examples:	 227
+Num classes with no test examples: 601
+
+Min examples: 10 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 387
+Total classes with desired number of examples:	 387
+(test)
+Total classes:	 303
+Total classes with desired number of examples:	 208
+Num classes with no test examples: 84
+
+Min examples: 15 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 208
+Total classes with desired number of examples:	 208
+(test)
+Total classes:	 207
+Total classes with desired number of examples:	 147
+Num classes with no test examples: 1
+
+Min examples: 20 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 137
+Total classes with desired number of examples:	 137
+(test)
+Total classes:	 136
+Total classes with desired number of examples:	 113
+Num classes with no test examples: 1
+
+Min examples: 25 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 87
+Total classes with desired number of examples:	 87
+(test)
+Total classes:	 86
+Total classes with desired number of examples:	 83
+Num classes with no test examples: 1
+
+Min examples: 30 | Test size: 0.07 | Train/test counts: 927/69
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+Num classes with no test examples: 0
+#+end_example
+
+#+begin_src python
+summarize_data_split(5, 0.15)
+summarize_data_split(10, 0.15)
+summarize_data_split(15, 0.15)
+summarize_data_split(20, 0.15, show_classes=False)
+summarize_data_split(25, 0.15)
+summarize_data_split(30, 0.15)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Min examples: 5 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 1048
+Total classes with desired number of examples:	 1003
+(test)
+Total classes:	 812
+Total classes with desired number of examples:	 533
+Num classes with no test examples: 236
+
+Min examples: 10 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 387
+Total classes with desired number of examples:	 376
+(test)
+Total classes:	 380
+Total classes with desired number of examples:	 326
+Num classes with no test examples: 7
+
+Min examples: 15 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 208
+Total classes with desired number of examples:	 208
+(test)
+Total classes:	 207
+Total classes with desired number of examples:	 207
+Num classes with no test examples: 1
+
+Min examples: 20 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 137
+Total classes with desired number of examples:	 137
+(test)
+Total classes:	 136
+Total classes with desired number of examples:	 136
+Num classes with no test examples: 1
+
+Min examples: 25 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 87
+Total classes with desired number of examples:	 87
+(test)
+Total classes:	 86
+Total classes with desired number of examples:	 86
+Num classes with no test examples: 1
+
+Min examples: 30 | Test size: 0.15 | Train/test counts: 847/149
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+Num classes with no test examples: 0
+#+end_example
 
 #+begin_src python
 summarize_data_split(5, 0.33)
@@ -526,7 +1100,7 @@ summarize_data_split(30, 0.33)
 
 #+RESULTS:
 #+begin_example
-Min examples: 5 | Test size: 0.33
+Min examples: 5 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 1044
 Total classes with desired number of examples:	 961
@@ -535,7 +1109,7 @@ Total classes:	 948
 Total classes with desired number of examples:	 807
 Num classes with no test examples: 96
 
-Min examples: 10 | Test size: 0.33
+Min examples: 10 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 387
 Total classes with desired number of examples:	 374
@@ -544,7 +1118,7 @@ Total classes:	 379
 Total classes with desired number of examples:	 378
 Num classes with no test examples: 8
 
-Min examples: 15 | Test size: 0.33
+Min examples: 15 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 208
 Total classes with desired number of examples:	 208
@@ -553,7 +1127,7 @@ Total classes:	 207
 Total classes with desired number of examples:	 207
 Num classes with no test examples: 1
 
-Min examples: 20 | Test size: 0.33
+Min examples: 20 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 137
 Total classes with desired number of examples:	 137
@@ -562,7 +1136,7 @@ Total classes:	 136
 Total classes with desired number of examples:	 136
 Num classes with no test examples: 1
 
-Min examples: 25 | Test size: 0.33
+Min examples: 25 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 87
 Total classes with desired number of examples:	 87
@@ -571,7 +1145,7 @@ Total classes:	 86
 Total classes with desired number of examples:	 86
 Num classes with no test examples: 1
 
-Min examples: 30 | Test size: 0.33
+Min examples: 30 | Test size: 0.33 | Train/test counts: 668/328
 (train)
 Total classes:	 69
 Total classes with desired number of examples:	 69

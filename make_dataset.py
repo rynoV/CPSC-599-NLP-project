@@ -14,5 +14,5 @@ if __name__ == '__main__':
     print('Making:', out)
     for path in all_inputs:
         db.merge(DocBin().from_disk(path))
-    print('Writing:', out)
+    print('Writing:', out, '# documents:', len(db))
     db.to_disk(out)

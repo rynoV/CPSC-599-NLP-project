@@ -1,4 +1,4 @@
-import util
+from util import sliding_window, change_extension
 from collections import defaultdict
 from urllib.parse import urlparse
 from itertools import chain
@@ -14,7 +14,7 @@ import sys
 import glob
 import os
 
-link_wrap_pattern = re.compile(r"(?P<wrapstart>__WRAPSTART(?P<uuid>.+?)__)\s(?P<content>.+?)\s(?P<wrapend>__WRAPEND__)", flags=re.DOTALL)
+link_wrap_pattern = re.compile(r"__WRAPSTART(?P<uuid>.+?)__\s(?P<content>.+?)\s__WRAPEND__", flags=re.DOTALL)
 link_wrap_split_pattern = re.compile(r"(__WRAPSTART.+?__\s.+?\s__WRAPEND__)", flags=re.DOTALL)
 
 def split_at_links(text):
@@ -39,6 +39,7 @@ def split_at_links(text):
 
 def save_spacy_data(path, name):
     nlp = spacy.blank("en")
+    nlp.add_pipe("sentencizer")
     db = DocBin()
     with open(path[1], 'r') as f:
         linkdata = json.load(f)
@@ -63,9 +64,33 @@ def save_spacy_data(path, name):
     if spans == []:
         print('Empty spans for:', path[0])
         return
-    doc.spans['sc'] = spans
-    db.add(doc)
-    out_path = util.change_extension(path[0], f'.{name}.spacy')
+    padded_sents = chain([None], doc.sents, [None])
+    i = 0
+    scount = 0
+    for prev, current, nxt in sliding_window(padded_sents, 3):
+        start_sent = prev or current
+        start = start_sent.start
+        end_sent = nxt or current
+        end = end_sent.end
+        new_doc = doc[start:end].as_doc()
+        new_doc_spans = []
+        offset = start_sent.start_char
+        while i < len(spans):
+            s = spans[i]
+            if s.start >= start and s.end <= end:
+                new_span = new_doc.char_span(s.start_char - offset, s.end_char - offset, label=s.label)
+                new_doc_spans.append(new_span)
+                i += 1
+            else:
+                break
+        if len(new_doc_spans) > 0:
+            # print('Adding subdocument:', new_doc)
+            # print('Spans:', new_doc_spans)
+            scount += len(new_doc_spans)
+            new_doc.spans['sc'] = new_doc_spans
+            db.add(new_doc)
+    assert scount == len(spans), f'Number of spans across subdocuments not equal to total'
+    out_path = change_extension(path[0], f'.{name}.spacy')
     # print('Writing:', out_path)
     db.to_disk(out_path)
 
@@ -75,7 +100,7 @@ def save_for_paths(x):
     save_spacy_data(paths, name)
 
 def linkdata_path_to_txt(path):
-    return util.change_extension(util.change_extension(path, ''), '.txt')
+    return change_extension(change_extension(path, ''), '.txt')
 
 def get_paths(name, split_suffix, data_dir):
     split_dir = os.path.join('split', f'{name}-{split_suffix}')

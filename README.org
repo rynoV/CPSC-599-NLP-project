@@ -43,5 +43,9 @@ single ~train.spacy~ / ~test.spacy~.
 Use the following to save a summary of the final dataset:
 
 #+begin_src shell
-python -m spacy debug data config.cfg --ignore-warnings --verbose --no-format --paths.train train.spacy --paths.dev test.spacy > data-summary.txt
+TOKENIZERS_PARALLELISM=false python -m spacy debug data config.cfg --ignore-warnings --verbose --no-format --paths.train train.spacy --paths.dev test.spacy > data-summary.txt
 #+end_src
+
+You may have to switch the ~spancat~ component in ~config.cfg~ to use the
+~spancat~ factory instead of ~spancat_singlelabel~ to get more details on
+the span labels.
