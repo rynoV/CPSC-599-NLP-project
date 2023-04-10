@@ -3,7 +3,7 @@
 #+property: header-args  :tangle yes :comments link :session t :results output :exports both
 
 #+begin_src python
-from util import change_extension
+from util import change_extension, sliding_window
 from collections import defaultdict
 import nltk
 import spacy
@@ -17,9 +17,9 @@ import components
 #+end_src
 
 #+RESULTS:
-
+* Evaluating trained model
 #+begin_src python
-trained = spacy.load("./packages/en_pipeline-0.0.6/en_pipeline/en_pipeline-0.0.6/")
+trained = spacy.load("./packages/en_pipeline-0.0.7/en_pipeline/en_pipeline-0.0.7/")
 print(trained.pipe_names)
 print(trained.component_names)
 trained.analyze_pipes(pretty=True)
@@ -126,7 +126,7 @@ To provide a good fit the model needs to be trained.
 
 
 A pipeline can be used to improve the model by using cross validation.
-(pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 1, 2)
+
 
 This is referred to as a warm start
 
@@ -135,16 +135,16 @@ In classification the model is trained to predict a number of classes
 
 
 Classification algorithms usually also offer a way to quantify certainty of a prediction, either using decision_function or predict_proba
-(predict_proba, 'glossary.html#term-predict_proba', 18, 19) (decision_function, 'glossary.html#term-decision_function', 16, 17)
+(decision_function, 'glossary.html#term-decision_function', 16, 17) (predict_proba, 'glossary.html#term-predict_proba', 18, 19)
 
 All built-in estimators also have a set_params method, which sets data-independent parameters (overriding previous parameter values passed to __init__).
-
+(_, 'sklearn.metrics.r2_score.html#sklearn.metrics.r2_score', 27, 28)
 
 y might be ignored in the case of unsupervised learning. However, to make it possible to use the estimator as part of a pipeline that can mix both supervised and unsupervised transformers, even unsupervised estimators need to accept a y=None keyword argument in the second position that is just ignored by the estimator.
 (pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 25, 26)
 
 When fit is called, any previous call to fit should be ignored. In general, calling estimator.fit(X1) and then estimator.fit(X2) should be the same as only calling estimator.fit(X2). However, this may not be true in practice when fit depends on some random process, see random_state. Another exception to this rule is when the hyper-parameter warm_start is set to True for estimators that support it.
-
+(warm_start, 'glossary.html#term-random_state', 65, 66)
 
 Attributes that have been estimated from the data must always have a name ending with trailing underscore, for example the coefficients of some regression estimator would be stored in a coef_ attribute after fit has been called.
 (fit, 'glossary.html#term-fit', 35, 36)
@@ -153,10 +153,10 @@ Often, the subestimator has a name (as e.g. named steps in a Pipeline object), i
 (Pipeline, 'modules/generated/sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 14, 15)
 
 Often, the subestimator has a name (as e.g. named steps in Pipeline objects), in which case the key should become <name>__C, <name>__class_weight, etc.
-
+(Pipeline, 'sklearn.pipeline.pipeline.html#sklearn.pipeline.pipeline', 13, 14)
 
 For an estimator to be usable together with pipeline.Pipeline in any but the last step, it needs to provide a fit or fit_transform function. To be able to evaluate the pipeline on any data but the training set, it also needs to provide a transform function. There are no special requirements for the last step in a pipeline, except that it has a fit function. All fit and fit_transform functions must take arguments X, y, even if y is not used. Similarly, for score to be usable, the last step of the pipeline needs to have a score function that accepts an optional y.
-(fit, 'glossary.html#term-fit', 74, 75)
+
 
 In a Pipeline object you can use GridSearchCV or RandomForestClassifier
 (GridSearchCV, 'modules/generated/sklearn.model_selection.gridsearchcv.html#sklearn.model_selection.gridsearchcv', 7, 8) (RandomForestClassifier, 'modules/generated/sklearn.ensemble.randomforestclassifier.html#sklearn.ensemble.randomforestclassifier', 9, 10)
@@ -168,7 +168,6 @@ The base object, implements a fit method to learn from data
 (fit, 'glossary.html#term-fit', 6, 7)
 
 Elements of the scikit-learn API are described more definitively in the Glossary of Common Terms and API Elements.
-(Glossary, 'glossary.html#term-n_jobs', 13, 14)
 #+end_example
 
 #+begin_src python
@@ -436,44 +435,6 @@ Changelog ¶
 (Thomas Fan, 'https://github.com/thomasjpfan', 288, 290) (sklearn.preprocessing, 'classes.html#module-sklearn.preprocessing', 52, 53)
 #+end_example
 
-#+begin_src python
-nlp = en_core_web_sm.load()
-print(nlp.pipe_names)
-print(nlp.component_names)
-nlp.analyze_pipes(pretty=True)
-#+end_src
-
-#+RESULTS:
-#+begin_example
-['tok2vec', 'tagger', 'parser', 'attribute_ruler', 'lemmatizer', 'ner']
-['tok2vec', 'tagger', 'parser', 'senter', 'attribute_ruler', 'lemmatizer', 'ner']
-[1m
-============================= Pipeline Overview =============================[0m
-
-#   Component         Assigns               Requires   Scores             Retokenizes
--   ---------------   -------------------   --------   ----------------   -----------
-0   tok2vec           doc.tensor                                          False
-
-1   tagger            token.tag                        tag_acc            False
-
-2   parser            token.dep                        dep_uas            False
-                      token.head                       dep_las
-                      token.is_sent_start              dep_las_per_type
-                      doc.sents                        sents_p
-                                                       sents_r
-                                                       sents_f
-
-3   attribute_ruler                                                       False
-
-4   lemmatizer        token.lemma                      lemma_acc          False
-
-5   ner               doc.ents                         ents_f             False
-                      token.ent_iob                    ents_p
-                      token.ent_type                   ents_r
-                                                       ents_per_type
-
-[38;5;2m✔ No problems found.[0m
-#+end_example
 * Exploring preprocessing
 #+begin_src python
 data_dir = 'data/html/processed/'
@@ -1154,3 +1115,143 @@ Total classes:	 69
 Total classes with desired number of examples:	 69
 Num classes with no test examples: 0
 #+end_example
+
+* Removing duplicates
+#+begin_src python
+test_db = DocBin().from_disk('data/iter6/test.spacy')
+train_db = DocBin().from_disk('data/iter6/train.spacy')
+test_docs = list(test_db.get_docs(trained.vocab))
+train_docs = list(train_db.get_docs(trained.vocab))
+print(len(test_docs), len(train_docs))
+#+end_src
+
+#+RESULTS:
+: 386 3860
+
+#+begin_src python
+def remove_duplicates(docs, seen):
+    new_docs = []
+    for i, doc in enumerate(docs):
+        # print('Doc:', i)
+        spans = doc.spans['sc']
+        spans_set = set(spans)
+        spans_used = set()
+        no_duplicates = True
+        for tokens in sliding_window(doc, 8):
+            ts = (' '.join(t.text.strip() for t in tokens)).lower()
+            all_spans_used = False
+            for span in filter(lambda s: any(t in s for t in tokens), spans):
+                if (ts, span.label) in seen:
+                    # print('Duplicate found:', ts)
+                    no_duplicates = False
+                    all_spans_used = spans_used == spans_set
+                else:
+                    seen.add((ts, span.label))
+                    spans_used.add(span)
+            if all_spans_used:
+                break
+        if no_duplicates:
+            new_docs.append(doc)
+    return new_docs, seen
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+seen = set()
+new_test_docs, seen = remove_duplicates(test_docs, seen)
+print(len(test_docs), len(new_test_docs))
+#+end_src
+
+#+RESULTS:
+: 386 259
+
+#+begin_src python
+new_train_docs, seen = remove_duplicates(train_docs, seen)
+print(len(train_docs), len(new_train_docs))
+#+end_src
+
+#+RESULTS:
+: 3860 1341
+
+#+begin_src python
+def show_docs_summary(docs, desired_examples, show_classes):
+    totals = defaultdict(int)
+    for link in (s.label_ for d in docs for s in d.spans['sc']):
+        totals[link] += 1
+    print('Total classes:\t', len(totals))
+    print('Total classes with desired number of examples:\t', len({k: v for k, v in totals.items() if v >= desired_examples}))
+    if show_classes:
+        print('Classes:', sorted([(v, k) for k, v in totals.items()], reverse=True))
+    return len(totals)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+def summarize_docs_split(train_docs, test_docs, show_classes=False):
+    print(f'Train/test counts: {len(train_docs)}/{len(test_docs)}')
+    print('(train)')
+    trainclasses = show_docs_summary(train_docs, 2, show_classes)
+    print('(test)')
+    testclasses = show_docs_summary(test_docs, 1, show_classes)
+    print('Num classes with no test examples:', trainclasses - testclasses)
+    print()
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+summarize_data_split(30, 0.05)
+print()
+summarize_docs_split(new_train_docs, new_test_docs)
+summarize_docs_split(train_docs, test_docs)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Min examples: 30 | Test size: 0.05 | Train/test counts: 947/49
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 69
+Total classes with desired number of examples:	 59
+Num classes with no test examples: 0
+
+
+Train/test counts: 1341/259
+(train)
+Total classes:	 60
+Total classes with desired number of examples:	 59
+(test)
+Total classes:	 63
+Total classes with desired number of examples:	 63
+Num classes with no test examples: -3
+
+Train/test counts: 3860/386
+(train)
+Total classes:	 69
+Total classes with desired number of examples:	 69
+(test)
+Total classes:	 63
+Total classes with desired number of examples:	 63
+Num classes with no test examples: 6
+#+end_example
+
+#+begin_src python
+def make_db(docs, name):
+    db = DocBin()
+    for doc in docs:
+        db.add(doc)
+    db.to_disk(f'{name}.spacy')
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+make_db(new_train_docs, 'train-no-dups')
+make_db(new_test_docs, 'test-no-dups')
+#+end_src
+
+#+RESULTS:

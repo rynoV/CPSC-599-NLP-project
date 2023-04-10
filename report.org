@@ -1,0 +1,21 @@
+* Writeup                                                      :ignore:
+:PROPERTIES:
+:EXPORT_FILE_NAME: .output/nlp-report
+:EXPORT_TITLE: NLP Project Report
+:EXPORT_OPTIONS: toc:nil num:nil H:8
+:EXPORT_LATEX_CLASS: acmart
+:EXPORT_LATEX_CLASS_OPTIONS: [manuscript,screen,review]
+:EXPORT_CITE_EXPORT: natbib
+:EXPORT_LATEX_HEADER: \bibliographystyle{ACM-Reference-Format}
+:EXPORT_AUTHOR: 30093813
+:END:
+
+#+bibliography: ~/org/nlp.bib
+
+DistilBERT [cite:@distilbert]
+
+scikit-multilearn [cite:@skmultilearn]
+
+Multi-label stratification [cite:@multilabelstrat2; @multilabelstrat1]
+
+#+print_bibliography:

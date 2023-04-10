@@ -1,167 +1,120 @@
-from util import change_extension
-from collections import defaultdict
-from urllib.parse import urlparse, urlunparse
-from itertools import chain
-import numpy as np
-import re
-import json
-import sys
-import glob
 import os
+import sys
+from collections import Counter
 
-def normalize_link_schemes(all_links):
-    link_paths = defaultdict(list)
-    for l in set(all_links):
-        parse = urlparse(l)
-        p = parse.netloc + parse.path + parse.fragment + parse.query + parse.params
-        if p != '':
-            link_paths[p].append((l, parse))
-    change_scheme = {}
-    for links in link_paths.values():
-        if len(links) > 1:
-            has_scheme = lambda scheme, ls: filter(lambda l: l[1].scheme == scheme, ls)
-            for httpsl, _ in has_scheme('https', links):
-               for l, p in links:
-                   if p.scheme == 'http':
-                       change_scheme[l] = httpsl
-    return [change_scheme.get(l) or l for l in all_links]
+import numpy as np
+import pandas as pd
+import spacy
+from imblearn.under_sampling import RandomUnderSampler
+from skmultilearn.model_selection.iterative_stratification import iterative_train_test_split
+from spacy.tokens import DocBin
 
-def normalize_relative_link(link):
-    if link.startswith('./') or link.startswith('../'):
-        return re.sub(r'^(\.?\./)+', '', link)
-    return link
 
-def normalize_links(all_link_data, min_examples):
-    all_links = []
-    # indices of links back to their linkdatas
-    link_linkdata = []
-    for i, linkdata in enumerate(all_link_data):
-        for k, v in linkdata.items():
-            all_links.append(v['link'].lower())
-            link_linkdata.append((i, k))
-    all_links = normalize_link_schemes(all_links)
-    all_links = [urlunparse(urlparse(l)) for l in all_links]
-    all_links = [normalize_relative_link(l) for l in all_links if l != '']
-    assert len(all_links) == len(link_linkdata)
-    counter = defaultdict(int)
-    for link in all_links:
-        counter[link] += 1
-    for (i, k), link in zip(link_linkdata, all_links):
-        all_link_data[i][k]['link'] = link if counter[link] >= min_examples else None
-    return all_link_data
+def resample(X, y):
+    rus = RandomUnderSampler(random_state=0)
+    X_i = np.arange(len(X)).reshape((-1, 1))
+    X_i, y = rus.fit_resample(X_i, y)
+    return X.loc[X_i.reshape((-1, ))], y
 
-def train_test_split(paths, test_size=0.33, min_examples=5):
-    """Algorithm:
 
-    - For each class, count its total number of examples, calculate
-      its ideal count for the training and test sets, (store in
-      vectors totals, trainideals, testideals)
+def get_x_y(data):
+    X = []
+    y = []
+    for doc in data:
+        for s in doc.spans['sc']:
+            X.append(doc)
+            y.append(s.label_)
+    X = pd.Series(X)
+    return X, y
 
-    - Init vector of zeros 'traincounts'. While the training set does
-      not have at least the ideal count for each class, and the
-      training set's max size has not been reached, repeat:
 
-      - Iterate through each document and count the number of examples
-        for each class for the document (store in vector counts)
+def manual_balance(X):
+    totals = Counter(s.label_ for doc in X for s in doc.spans['sc'])
+    summary = pd.DataFrame([{
+        'count': count,
+        'link': link
+    } for link, count in totals.items()])
+    summary = summary.set_index('link')
+    min_count = summary.min()['count']
+    summary['count_r'] = summary['count']
+    Xb = []
+    for doc in X:
+        spans = doc.spans['sc']
+        if len(spans) == 0:
+            continue
+        counts = Counter(s.label_ for s in spans)
+        count_r = summary['count_r'].loc[list(counts.keys())]
+        df = pd.DataFrame([{
+            'link': k,
+            'count_r': c
+        } for k, c in counts.items()]).set_index('link')
+        count_r -= df['count_r']
+        if all(count_r >= min_count):
+            summary['count_r'].loc[count_r.index] = count_r
+        else:
+            Xb.append(doc)
+    return Xb
 
-      - Take the absolute difference between (traincounts + counts) and
-        trainideals, sum that in v
-
-      - Subtract (traincounts + counts) from totals, and for each value
-        x (with index i) less than testideals[i], compute 1/totals[i],
-        sum these all together in m. This is intended to penalize more
-        heavily data splits which leave fewer examples to the classes
-        with fewer examples
-
-      - Let n be the number of non-zero elements in (traincounts + counts)
-
-      - Let score = 1/v - m + n. The highest scoring document for the
-        iteration is added to the training set, and counts is added to
-        traincounts
-
-    - Add the remaining documents to the test set
-
-    """
-    docs_data = []
-    linkdatapaths = []
-    for p in paths:
-        linkdatapath = change_extension(p, '.linkdata.json')
-        linkdatapaths.append(linkdatapath)
-        with open(linkdatapath, 'r') as f:
-            link_data = json.load(f)
-            docs_data.append(link_data)
-    docs_data = normalize_links(docs_data, min_examples)
-    classes = {}
-    class_index = 0
-    totals = []
-    for v in (v for d in docs_data for v in d.values()):
-        link = v['link']
-        if link is not None:
-            if link not in classes:
-                classes[link] = class_index
-                class_index += 1
-                totals.append(1)
-            else:
-                totals[classes[link]] += 1
-    doc_counts = {}
-    for doc_ind, d in enumerate(docs_data):
-        doc_data = np.zeros(len(classes))
-        for v in d.values():
-            link = v['link']
-            if link is not None:
-                doc_data[classes[link]] += 1
-        doc_counts[doc_ind] = doc_data
-    totals = np.array(totals)
-    testideals = np.floor(totals * test_size)
-    trainideals = totals - testideals
-    traincounts = np.zeros(len(totals))
-    traindata = []
-    traindata_max = len(paths) * (1-test_size)
-    while len(traindata) < traindata_max and np.any(traincounts < trainideals):
-        best = (0, float('-inf'))
-        if len(doc_counts) <= 0:
-            print('Bug in train test split')
-            break
-        init = True
-        for doc_ind, counts in doc_counts.items():
-            newcounts = traincounts + counts
-            if init and not np.any(newcounts > trainideals):
-                best = (doc_ind, float('-inf'))
-                break
-            init = False
-            v = np.sum(np.absolute(trainideals - newcounts))
-            m = 0
-            for i, x in enumerate(totals - newcounts):
-                if x < testideals[i]:
-                    m += 1 / totals[i]
-            n = np.count_nonzero(newcounts)
-            score = 1 / v - m + n
-            if score > best[1]:
-                best = (doc_ind, score)
-        doc = best[0]
-        counts = doc_counts[doc]
-        del doc_counts[doc]
-        traincounts = traincounts + counts
-        print(traincounts)
-        print(trainideals)
-        print(len(doc_counts))
-        traindata.append((linkdatapaths[doc], docs_data[doc]))
-    testdata = [(linkdatapaths[doc_ind], docs_data[doc_ind]) for doc_ind in doc_counts.keys()]
-    return traindata, testdata
-
-def save_paths(paths, name, min_examples, test_size):
-    for path, linkdata in paths:
-        path = os.path.join('split', f'{name}-{min_examples}-{test_size*100:.0f}', path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(linkdata, f)
 
 if __name__ == '__main__':
     data_dir = sys.argv[1]
     min_examples = int(sys.argv[2])
     test_size = float(sys.argv[3])
-    pattern = os.path.join(data_dir, '**', '*' + '.txt')
-    all_txt = glob.glob(pattern, recursive=True)
-    train, test = train_test_split(all_txt, test_size=test_size, min_examples=min_examples)
-    save_paths(train, 'train', min_examples, test_size)
-    save_paths(test, 'test', min_examples, test_size)
+    nlp = spacy.blank('en')
+    db = DocBin().from_disk(os.path.join(data_dir, 'data.spacy'))
+    docs = pd.Series(list(db.get_docs(nlp.vocab)))
+    n = len(docs)
+    print(f'Splitting {n} docs')
+    label_count = Counter(s.label for doc in docs for s in doc.spans['sc'])
+    print(f'Initial label count: {len(label_count)}')
+    label_indices = {}
+    i = 0
+    for l, count in label_count.items():
+        if count >= min_examples:
+            label_indices[l] = i
+            i += 1
+    print(f'Label count after filtering: {len(label_indices)}')
+    labels = []
+    for doc in docs:
+        row = np.zeros(len(label_indices))
+        indices = [
+            label_indices[s.label] for s in doc.spans['sc']
+            if s.label in label_indices
+        ]
+        spans = doc.spans['sc']
+        doc.spans['sc'] = []
+        for i in range(len(spans)):
+            s = spans[i]
+            if s.label in label_indices:
+                doc.spans['sc'].append(s)
+                indices.append(label_indices[s.label])
+        row[indices] = 1
+        labels.append(row)
+    labels = np.array(labels)
+
+    doc_indices = np.arange(n).reshape((-1, 1))
+    docs_train, _, docs_test, _ = iterative_train_test_split(
+        doc_indices,
+        labels,
+        test_size=test_size,
+    )
+    docs_train = docs.loc[docs_train.reshape((-1, ))]
+    docs_test = docs.loc[docs_test.reshape((-1, ))]
+
+    # docs_train, y_train = get_x_y(docs_train)
+    # docs_test, y_test = get_x_y(docs_test)
+    # docs_train, y_train = resample(docs_train, y_train)
+    # docs_test, y_test = resample(docs_test, y_test)
+    docs_train = manual_balance(docs_train)
+    docs_test = manual_balance(docs_test)
+
+    train_db = DocBin(docs=docs_train)
+    print(f'{len(train_db)} training documents')
+    train_db.to_disk(
+        os.path.join(data_dir, 'split',
+                     f'train-{min_examples}-{test_size*100:.0f}.spacy'))
+    test_db = DocBin(docs=docs_test)
+    print(f'{len(test_db)} testing documents')
+    test_db.to_disk(
+        os.path.join(data_dir, 'split',
+                     f'test-{min_examples}-{test_size*100:.0f}.spacy'))

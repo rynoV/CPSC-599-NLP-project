@@ -1,0 +1,11 @@
+{
+    "python.linting.ignorePatterns": [
+        "**/site-packages/**/*.py",
+        ".vscode/*.py",
+    ],
+    "python.analysis.exclude": [
+        "./scikit-learn/",
+        "./data/",
+        "./parser/"
+    ],
+}

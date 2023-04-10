@@ -10,7 +10,7 @@
 :EXPORT_AUTHOR: 30093813
 :END:
 
-#+bibliography: nlp.bib
+#+bibliography: ~/org/nlp.bib
 ** Introduction
 This project will attempt to address the problems resulting from the
 necessity for manual linking in educational material. In particular,
