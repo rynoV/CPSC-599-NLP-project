@@ -1,2 +1,9 @@
 /__pycache__/
 /.direnv/
+output/*
+!output/model-best*/
+output/model-best*/*
+!output/model-best*/config.cfg
+!output/model-best*/meta.json
+!output/model-best*/readme.*
+!output/model-best*/results.csv

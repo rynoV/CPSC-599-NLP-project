@@ -61,7 +61,7 @@ if __name__ == '__main__':
     min_examples = int(sys.argv[2])
     test_size = float(sys.argv[3])
     nlp = spacy.blank('en')
-    db = DocBin().from_disk(os.path.join(data_dir, 'data.spacy'))
+    db = DocBin(store_user_data=True).from_disk(os.path.join(data_dir, 'data.spacy'))
     docs = pd.Series(list(db.get_docs(nlp.vocab)))
     n = len(docs)
     print(f'Splitting {n} docs')
@@ -108,12 +108,12 @@ if __name__ == '__main__':
     docs_train = manual_balance(docs_train)
     docs_test = manual_balance(docs_test)
 
-    train_db = DocBin(docs=docs_train)
+    train_db = DocBin(docs=docs_train, store_user_data=True)
     print(f'{len(train_db)} training documents')
     train_db.to_disk(
         os.path.join(data_dir, 'split',
                      f'train-{min_examples}-{test_size*100:.0f}.spacy'))
-    test_db = DocBin(docs=docs_test)
+    test_db = DocBin(docs=docs_test, store_user_data=True)
     print(f'{len(test_db)} testing documents')
     test_db.to_disk(
         os.path.join(data_dir, 'split',

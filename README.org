@@ -1,44 +1,11 @@
-* NLP Project
+* Corpus-Specific Automatic Hyperlinking
+#+begin_src shell
+python preprocess.py <datadir>
+#+end_src
+
 #+begin_src shell
 python train_test_split.py <datadir> <min_examples> <test_size>
 #+end_src
-
-This will make a folder
-~split/{train,test}-<suffix>/<datadir>~ with
-preprocessed link data files, where ~<suffix>~ records the configuration
-used.
-
-Before continuing, delete the old spacy data files:
-
-#+begin_src shell
-fd -e spacy . data/html/processed/ --exec rm {}
-#+end_src
-
-Then run:
-
-#+begin_src shell
-python preprocess.py <datadir> <splitsuffix>
-#+end_src
-
-This will make ~.train.spacy~ and ~.test.spacy~ for each of the data files
-in ~split/train-<splitsuffix>~ and ~split/test-<splitsuffix>~. ~datadir~
-should be the folder created by the ~parser~.
-
-#+begin_src shell
-fd -e train.spacy . <datadir> --exec zip train.zip {}
-fd -e test.spacy . <datadir> --exec zip test.zip {}
-#+end_src
-
-These command can be used to make zip files containing all the
-training/testing data.
-
-#+begin_src shell
-python make_dataset.py <datadir> train
-python make_dataset.py <datadir> test
-#+end_src
-
-These commands can be used to merge all the individual files into a
-single ~train.spacy~ / ~test.spacy~.
 
 Use the following to save a summary of the final dataset:
 

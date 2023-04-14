@@ -45,11 +45,13 @@ def normalize_links(all_link_data):
     link_link_data = []
     for i, link_data in enumerate(all_link_data):
         for k, v in link_data.items():
-            all_links.append(v['link'].lower())
+            all_links.append(v['link'].lower().strip())
             link_link_data.append((i, k))
+    print('Total unique links before normalization:', len(set(all_links)))
     all_links = normalize_link_schemes(all_links)
     all_links = [urlunparse(urlparse(l)) for l in all_links]
     all_links = [normalize_relative_link(l) for l in all_links if l != '']
+    print('Total unique links after normalization:', len(set(all_links)))
     assert len(all_links) == len(link_link_data)
     for (i, k), link in zip(link_link_data, all_links):
         all_link_data[i][k]['link'] = link
@@ -93,7 +95,7 @@ def make_new_span(doc, s, offset):
 def save_spacy_data(args):
     path, linkdata, nlp = args
     # print('Processing', path[0])
-    db = DocBin()
+    db = DocBin(store_user_data=True)
     with open(path, 'r') as f:
         text = f.read()
     split = split_at_links(text)
@@ -107,6 +109,8 @@ def save_spacy_data(args):
         link = content_link['link']
         content = doc.char_span(start, end, label=link)
         link_text = content.text
+        # Require that the span contains enough word characters, to remove
+        # uninformative spans like "¶"
         if len(re.sub(r'\W', '', link_text)) > 2:
             for t in content:
                 t._.content = content_link
@@ -124,6 +128,7 @@ def save_spacy_data(args):
         end_sent = nxt or current
         end = end_sent.end
         new_doc = doc[start:end].as_doc()
+        new_doc.user_data['file'] = path
         new_doc_spans = []
         offset = start_sent.start_char
         while i < len(spans):
@@ -158,10 +163,8 @@ def save_spacy_data(args):
                 new_spans.append(make_new_span(new_doc, ss, offset))
             new_doc.spans['sc'] = new_spans
             db.add(new_doc)
-    assert len(spans_used) == len(
-        spans
-    ), f'Number of spans across subdocuments not equal to total: {len(spans_used)}, {len(spans)}, {path[0]}'
-    # print('Writing:', out_path)
+    assert len(spans_used) == len(spans),\
+          f'Number of spans across subdocuments not equal to total: {len(spans_used)}, {len(spans)}, {path[0]}'
     return db
 
 
@@ -208,7 +211,7 @@ if __name__ == '__main__':
             link_data = json.load(f)
             docs_data.append(link_data)
     docs_data = normalize_links(docs_data)
-    db = DocBin()
+    db = DocBin(store_user_data=True)
     nlp = spacy.blank("en")
     nlp.add_pipe("sentencizer")
     nlp.initialize()
@@ -216,10 +219,11 @@ if __name__ == '__main__':
         for d in pool.map(save_spacy_data, ((path, docs_data[i], nlp)
                                             for i, path in enumerate(all_txt)),
                           100):
+            d.store_user_data = True
             db.merge(d)
     print(f'Total of {len(db)} examples before duplicates')
     docs = list(db.get_docs(nlp.vocab))
     docs = remove_duplicates(docs)
-    db = DocBin(docs=docs)
+    db = DocBin(docs=docs, store_user_data=True)
     print(f'Total of {len(db)} examples after duplicates')
     db.to_disk(os.path.join('data', 'data.spacy'))
