@@ -16,3 +16,11 @@ TOKENIZERS_PARALLELISM=false python -m spacy debug data config.cfg --ignore-warn
 You may have to switch the ~spancat~ component in ~config.cfg~ to use the
 ~spancat~ factory instead of ~spancat_singlelabel~ to get more details on
 the span labels.
+
+** Resources
+
+- https://medium.com/data-analytics-at-nesta/a-deep-dive-into-spacys-span-categorisation-model-992024d047c2
+- https://github.com/explosion/spaCy/discussions/8600
+- https://github.com/explosion/spaCy/discussions/9451
+- https://github.com/explosion/spaCy/discussions/9602
+- https://github.com/explosion/spaCy/discussions/7486#discussioncomment-512106
